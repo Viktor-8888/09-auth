@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { parseSetCookie } from 'cookie';
+import { parseCookie } from 'cookie';
+
 import { checkSession } from './lib/api/serverApi';
 
 const privateRoutes = ['/profile', '/notes'];
@@ -11,8 +12,8 @@ export async function proxy(request: NextRequest) {
 
   const cookieStore = await cookies();
 
-  const accessToken = cookieStore.get('accessToken')?.value;
-  const refreshToken = cookieStore.get('refreshToken')?.value;
+  const accessToken = cookieStore.get('accessToken');
+  const refreshToken = cookieStore.get('refreshToken');
 
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
 
@@ -20,40 +21,48 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith(route)
   );
 
-  if (!accessToken) {
-    if (refreshToken) {
-      try {
-        const data = await checkSession();
-        const setCookie = data.headers['set-cookie'];
+  if (accessToken === undefined) {
+    if (refreshToken !== undefined) {
+      const { headers } = await checkSession();
 
-        if (setCookie) {
-          const response = isPublicRoute
-            ? NextResponse.redirect(new URL('/', request.url))
-            : NextResponse.next();
+      const setCookie = headers['set-cookie'];
 
-          const cookieArray = Array.isArray(setCookie)
-            ? setCookie
-            : [setCookie];
+      if (setCookie !== undefined) {
+        const cookieArray = Array.isArray(setCookie) ? setCookie : [setCookie];
 
-          for (const cookieStr of cookieArray) {
-            const parsed = parseSetCookie(cookieStr);
+        for (const cookieString of cookieArray) {
+          const parsed = parseCookie(cookieString);
 
-            if (parsed.name && parsed.value) {
-              response.cookies.set(parsed.name, parsed.value, {
-                path: parsed.path,
-                expires: parsed.expires,
-                httpOnly: parsed.httpOnly,
-                secure: parsed.secure,
-                sameSite: parsed.sameSite,
-                maxAge: parsed.maxAge,
-              });
-            }
+          const options = {
+            expires: parsed.Expires ? new Date(parsed.Expires) : undefined,
+            path: parsed.Path,
+            maxAge: parsed['Max-Age'] ? Number(parsed['Max-Age']) : undefined,
+          };
+
+          if (parsed.accessToken !== undefined) {
+            cookieStore.set('accessToken', parsed.accessToken, options);
           }
 
-          return response;
+          if (parsed.refreshToken !== undefined) {
+            cookieStore.set('refreshToken', parsed.refreshToken, options);
+          }
         }
-      } catch {
-        // якщо refresh token вже невалідний — нічого не робимо
+
+        if (isPublicRoute) {
+          return NextResponse.redirect(new URL('/', request.url), {
+            headers: {
+              Cookie: cookieStore.toString(),
+            },
+          });
+        }
+
+        if (isPrivateRoute) {
+          return NextResponse.next({
+            headers: {
+              Cookie: cookieStore.toString(),
+            },
+          });
+        }
       }
     }
 
@@ -64,10 +73,14 @@ export async function proxy(request: NextRequest) {
     if (isPrivateRoute) {
       return NextResponse.redirect(new URL('/sign-in', request.url));
     }
-  }
+  } else {
+    if (isPrivateRoute) {
+      return NextResponse.next();
+    }
 
-  if (isPublicRoute) {
-    return NextResponse.redirect(new URL('/', request.url));
+    if (isPublicRoute) {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
   }
 
   return NextResponse.next();
