@@ -8,7 +8,9 @@ const publicRoutes = ['/sign-in', '/sign-up'];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
   const cookieStore = await cookies();
+
   const accessToken = cookieStore.get('accessToken')?.value;
   const refreshToken = cookieStore.get('refreshToken')?.value;
 
@@ -20,34 +22,38 @@ export async function proxy(request: NextRequest) {
 
   if (!accessToken) {
     if (refreshToken) {
-      const data = await checkSession();
-      const setCookie = data.headers['set-cookie'];
+      try {
+        const data = await checkSession();
+        const setCookie = data.headers['set-cookie'];
 
-      if (setCookie) {
-        const cookieArray = Array.isArray(setCookie) ? setCookie : [setCookie];
-        for (const cookieStr of cookieArray) {
-          const parsed = parseSetCookie(cookieStr);
+        if (setCookie) {
+          const response = isPublicRoute
+            ? NextResponse.redirect(new URL('/', request.url))
+            : NextResponse.next();
 
-          if (parsed.value) {
-            cookieStore.set(parsed.name, parsed.value, parsed);
+          const cookieArray = Array.isArray(setCookie)
+            ? setCookie
+            : [setCookie];
+
+          for (const cookieStr of cookieArray) {
+            const parsed = parseSetCookie(cookieStr);
+
+            if (parsed.name && parsed.value) {
+              response.cookies.set(parsed.name, parsed.value, {
+                path: parsed.path,
+                expires: parsed.expires,
+                httpOnly: parsed.httpOnly,
+                secure: parsed.secure,
+                sameSite: parsed.sameSite,
+                maxAge: parsed.maxAge,
+              });
+            }
           }
-        }
 
-        if (isPublicRoute) {
-          return NextResponse.redirect(new URL('/', request.url), {
-            headers: {
-              Cookie: cookieStore.toString(),
-            },
-          });
+          return response;
         }
-
-        if (isPrivateRoute) {
-          return NextResponse.next({
-            headers: {
-              Cookie: cookieStore.toString(),
-            },
-          });
-        }
+      } catch {
+        // якщо refresh token вже невалідний — нічого не робимо
       }
     }
 
@@ -64,9 +70,6 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  if (isPrivateRoute) {
-    return NextResponse.next();
-  }
   return NextResponse.next();
 }
 

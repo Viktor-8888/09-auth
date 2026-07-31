@@ -14,7 +14,7 @@ const NotePreviewClient = () => {
     isLoading,
     isError,
   } = useQuery({
-    queryKey: ['notes', id],
+    queryKey: ['note', id],
     queryFn: () => fetchNoteById(id),
     refetchOnMount: false,
   });
