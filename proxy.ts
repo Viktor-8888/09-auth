@@ -32,8 +32,10 @@ export async function proxy(request: NextRequest) {
         for (const cookieString of cookieArray) {
           const parsed = parseSetCookie(cookieString);
 
-          if (parsed.value) {
-            cookieStore.set(parsed.name, parsed.value, parsed);
+          const { name, value, ...cookieOptions } = parsed;
+
+          if (value !== undefined) {
+            cookieStore.set(name, value, cookieOptions);
           }
         }
 
